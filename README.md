@@ -24,6 +24,35 @@ tests/                 Data quality checks for Silver and Gold layers
 6. Run Gold layer scripts.
 7. Run quality checks from `tests/`.
 
+## Run From PowerShell
+
+Create your local MySQL config:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Update `MYSQL_PASSWORD` in `.env`, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_bronze.ps1
+```
+
+To run the full project pipeline:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_all.ps1
+```
+
+The runner looks for `mysql.exe` in PATH and common MySQL Server installation folders. It also enables `--local-infile=1` so `LOAD DATA LOCAL INFILE` can load CSV files from `datasets/`.
+
+If CSV loading is blocked, enable local infile in MySQL:
+
+```sql
+SET GLOBAL local_infile = 1;
+```
+
 ## Source Systems
 
 - CRM: customer, product, and sales transaction data.

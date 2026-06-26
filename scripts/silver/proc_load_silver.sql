@@ -113,50 +113,65 @@ SHOW COLUMNS FROM dw_bronze.crm_cust_info;
 select * from dw_bronze.crm_prd_info
 limit 100;
 
-
+use dw_silver;
 TRUNCATE TABLE crm_prd_info;
 
 INSERT INTO crm_prd_info
 (
-    prd_id,
-    prd_key,
-    prd_nm,
-    prd_cost,
-    prd_line,
-    prd_start_dt,
-    prd_end_dt
+prd_id,
+prd_key,
+prd_nm,
+prd_cost,
+prd_line,
+prd_start_dt,
+prd_end_dt
 )
 
 SELECT
 
-    prd_id,
 
-    SUBSTRING(prd_key, 4) AS prd_key,
+prd_id,
 
-    TRIM(prd_nm) AS prd_nm,
+SUBSTRING(prd_key, 4) AS prd_key,
 
-    IFNULL(prd_cost, 0) AS prd_cost,
+TRIM(prd_nm) AS prd_nm,
 
-    CASE UPPER(TRIM(prd_line))
+IFNULL(prd_cost, 0) AS prd_cost,
 
-        WHEN 'M' THEN 'Mountain'
-        WHEN 'R' THEN 'Road'
-        WHEN 'S' THEN 'Other Sales'
-        WHEN 'T' THEN 'Touring'
+CASE UPPER(TRIM(prd_line))
 
-        ELSE 'Unknown'
+    WHEN 'M' THEN 'Mountain'
+    WHEN 'R' THEN 'Road'
+    WHEN 'S' THEN 'Other Sales'
+    WHEN 'T' THEN 'Touring'
 
-    END AS prd_line,
+    ELSE 'Unknown'
 
-    prd_start_dt,
+END AS prd_line,
 
-    CASE
-        WHEN YEAR(prd_end_dt) = 0
-            THEN NULL
-        ELSE prd_end_dt
-    END AS prd_end_dt
+CAST(prd_start_dt AS DATE) AS prd_start_dt,
+
+CASE
+    WHEN LEAD(CAST(prd_start_dt AS DATE))
+         OVER (
+             PARTITION BY SUBSTRING(prd_key, 4)
+             ORDER BY CAST(prd_start_dt AS DATE)
+         ) IS NULL
+    THEN NULL
+
+    ELSE DATE_SUB(
+            LEAD(CAST(prd_start_dt AS DATE))
+            OVER (
+                PARTITION BY SUBSTRING(prd_key, 4)
+                ORDER BY CAST(prd_start_dt AS DATE)
+            ),
+            INTERVAL 1 DAY
+         )
+END AS prd_end_dt
+
 
 FROM dw_bronze.crm_prd_info;
+
 
 
 /*=============================================================================
@@ -165,69 +180,60 @@ LOAD CRM SALES DETAILS
 
 TRUNCATE TABLE crm_sales_details;
 
-TRUNCATE TABLE crm_sales_details;
-
 INSERT INTO crm_sales_details
 (
-    sls_ord_num,
-    sls_prd_key,
-    sls_cust_id,
-    sls_order_dt,
-    sls_ship_dt,
-    sls_due_dt,
-    sls_sales,
-    sls_quantity,
-    sls_price
+sls_ord_num,
+sls_prd_key,
+sls_cust_id,
+sls_order_dt,
+sls_ship_dt,
+sls_due_dt,
+sls_sales,
+sls_quantity,
+sls_price
 )
 
 SELECT
 
-    sls_ord_num,
 
-    SUBSTRING(sls_prd_key,4) AS sls_prd_key,
+sls_ord_num,
 
-    sls_cust_id,
+SUBSTRING(sls_prd_key, 4) AS sls_prd_key,
 
-    CASE
-        WHEN LENGTH(sls_order_dt)=8
-             AND sls_order_dt <> 0
-        THEN STR_TO_DATE(CAST(sls_order_dt AS CHAR), '%Y%m%d')
-        ELSE NULL
-    END,
+sls_cust_id,
 
-    CASE
-        WHEN LENGTH(sls_ship_dt)=8
-             AND sls_ship_dt <> 0
-        THEN STR_TO_DATE(CAST(sls_ship_dt AS CHAR), '%Y%m%d')
-        ELSE NULL
-    END,
+CASE
+    WHEN sls_order_dt = 0
+         OR LENGTH(sls_order_dt) != 8
+    THEN NULL
+    ELSE STR_TO_DATE(CAST(sls_order_dt AS CHAR), '%Y%m%d')
+END AS sls_order_dt,
 
-    CASE
-        WHEN LENGTH(sls_due_dt)=8
-             AND sls_due_dt <> 0
-        THEN STR_TO_DATE(CAST(sls_due_dt AS CHAR), '%Y%m%d')
-        ELSE NULL
-    END,
+CASE
+    WHEN sls_ship_dt = 0
+         OR LENGTH(sls_ship_dt) != 8
+    THEN NULL
+    ELSE STR_TO_DATE(CAST(sls_ship_dt AS CHAR), '%Y%m%d')
+END AS sls_ship_dt,
 
-    CASE
-        WHEN sls_sales IS NULL OR sls_sales <= 0
-            THEN ABS(sls_quantity * sls_price)
-        ELSE sls_sales
-    END,
+CASE
+    WHEN sls_due_dt = 0
+         OR LENGTH(sls_due_dt) != 8
+    THEN NULL
+    ELSE STR_TO_DATE(CAST(sls_due_dt AS CHAR), '%Y%m%d')
+END AS sls_due_dt,
 
-    CASE
-        WHEN sls_quantity IS NULL OR sls_quantity <=0
-            THEN 1
-        ELSE sls_quantity
-    END,
+/* Final Sales Calculation */
+ABS(sls_quantity * sls_price) AS sls_sales,
 
-    CASE
-        WHEN sls_price IS NULL OR sls_price <=0
-            THEN ROUND(sls_sales/NULLIF(sls_quantity,0),2)
-        ELSE sls_price
-    END
+sls_quantity,
+
+NULLIF(ABS(sls_price) ,0)AS sls_price
+
 
 FROM dw_bronze.crm_sales_details;
+
+
 /*-----------------------------------------------------------------------------
 VALIDATION
 -----------------------------------------------------------------------------*/
@@ -249,17 +255,16 @@ gen
 )
 
 SELECT
-
-
 CASE
     WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid,4)
     ELSE cid
 END AS cid,
-
 CASE
-    WHEN YEAR(bdate)=0 THEN NULL
-    ELSE bdate
-END AS bdate,
+        WHEN YEAR(bdate) = 0 THEN NULL
+        WHEN bdate < '1924-01-01' THEN NULL
+        WHEN bdate > CURDATE() THEN NULL
+        ELSE bdate
+    END AS bdate,
 
 CASE
     WHEN UPPER(TRIM(gen)) IN ('M','MALE')
